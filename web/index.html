@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>TRON TIP-191 (hex text) — works everywhere</title>
+    <link rel="icon" href="data:,">
+    <style>
+      body{font-family:system-ui;margin:2rem} input{width:520px;padding:.5rem}
+      button{padding:.5rem .8rem;margin:.25rem .25rem .25rem 0}
+      pre{background:#111;color:#ddd;padding:1rem;border-radius:.5rem}
+    </style>
+  </head>
+  <body>
+    <h3>Sign HEX text (len=66) → verifyHexText</h3>
+    <div>
+      <button id="connect">Connect wallet</button>
+      <button id="who">Who am I?</button>
+    </div>
+    <div style="margin:.6rem 0">
+      <label>Contract T-address:</label><br/>
+      <input id="caddr" placeholder="T... (TronSigVerifierLite)"/>
+    </div>
+    <div>
+      <button id="signHex">Sign keccak256('demo-payload') as HEX text</button>
+    </div>
+    <pre id="out">(logs)</pre>
+
+    <script type="module">
+      const out = document.getElementById('out');
+      const log = (...a)=> out.textContent += a.map(x=>typeof x==='string'?x:JSON.stringify(x,null,2)).join(' ')+"\n";
+      const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+
+      async function waitTronWeb(ms=12000){
+        const t0=Date.now();
+        while(Date.now()-t0<ms){ if(window.tronWeb?.trx) return window.tronWeb; await sleep(50); }
+        throw new Error('tronWeb not found. Serve over http(s) and unlock TronLink.');
+      }
+      async function ensureConnected(){
+        try{ await window.tronLink?.request?.({ method:'tron_requestAccounts' }); }catch{}
+        const tw = await waitTronWeb();
+        for (let i=0;i<80 && !tw.defaultAddress?.base58;i++) await sleep(50);
+        if (!tw.defaultAddress?.base58) throw new Error('No account. Unlock/connect TronLink.');
+        return tw;
+      }
+      async function demoHashHex(){
+        const tw = await waitTronWeb();
+        return tw.utils.ethersUtils.keccak256(
+          tw.utils.ethersUtils.toUtf8Bytes('demo-payload')
+        ); // "0x"+64
+      }
+
+      document.getElementById('connect').onclick = async ()=>{
+        try{ const tw=await ensureConnected(); log('Connected:', tw.defaultAddress.base58, '| node:', tw.fullNode?.host, '\n'); }
+        catch(e){ log('CONNECT ERROR:', e.message, '\n'); }
+      };
+      document.getElementById('who').onclick = async ()=>{
+        try{ const tw=await ensureConnected(); log('Addr (Base58):', tw.defaultAddress.base58); log('Addr (Hex):', tw.defaultAddress.hex, '\n'); }
+        catch(e){ log('WHO ERROR:', e.message, '\n'); }
+      };
+
+      document.getElementById('signHex').onclick = async ()=>{
+        try{
+          const tw = await ensureConnected();
+          const addr = document.getElementById('caddr').value.trim();
+          if(!addr) throw new Error('Paste contract T-address');
+          const hexText = await demoHashHex();            // "0x" + 64 (ASCII)
+          log('hexText:', hexText);
+          const sig = await tw.trx.signMessageV2(hexText); // always supported
+          const who = await tw.trx.verifyMessageV2(hexText, sig);
+          log('Signature:', sig);
+          log('Recovered (off-chain):', who);
+
+          // on-chain verifyHexText(bytes32,bytes,address)
+          const c = await tw.contract().at(addr);
+          const ok = await c.verifyHexText(hexText, sig, tw.defaultAddress.hex).call();
+          log('verifyHexText (on-chain) =>', ok, '\n');
+        }catch(e){ log('HEX TEXT ERROR:', e.message, '\n'); }
+      };
+    </script>
+  </body>
+</html>
